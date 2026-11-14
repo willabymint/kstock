@@ -136,3 +136,21 @@ def map_sector(upjong: str):
         if kw in (upjong or ""):
             return sec
     return None
+
+
+def _longest(table, ksic):
+    k = str(ksic or "")
+    for n in range(len(k), 1, -1):
+        if k[:n] in table:
+            return table[k[:n]]
+    return None
+
+
+def map_ksic(ksic):
+    """표준산업분류 코드 → 수출 섹터"""
+    return _longest(config.KSIC_SECTOR, ksic)
+
+
+def ksic_label(ksic):
+    """표준산업분류 코드 → 화면에 보여줄 업종명"""
+    return _longest(config.KSIC_LABEL, ksic)

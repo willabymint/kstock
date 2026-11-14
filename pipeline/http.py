@@ -18,7 +18,7 @@ class Http:
         self.s = requests.Session()
         self.s.headers.update({
             "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
-            "Accept-Language": "ko-KR,ko;q=0.9",
+            "Accept-Language": "ko-KR,ko;q=0.9", "Referer": "https://m.stock.naver.com/",
         })
         self.min_interval = min_interval
         CACHE.mkdir(exist_ok=True, parents=True)

@@ -60,6 +60,11 @@ class Dart:
                 m[sc] = it.findtext("corp_code")
         return m
 
+    def ksic(self, corp):
+        """기업개황의 표준산업분류 코드"""
+        d = self._json("company.json", corp_code=corp, ttl_h=24 * 30)
+        return (d.get("induty_code") or "").strip() or None
+
     # ---- 재무 ------------------------------------------------
     def _statements(self, corp, year, reprt):
         for fs in ("CFS", "OFS"):

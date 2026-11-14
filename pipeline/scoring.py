@@ -60,6 +60,8 @@ def derive(rec):
         d["opm"] = fy["op"][0] / r0 * 100 if r0 and fy["op"][0] is not None else None
         d["opm_prev"] = fy["op"][1] / r1 * 100 if r1 and fy["op"][1] is not None else None
         d["ocf_fy"] = fy["ocf"][0]
+        e0 = fy["equity"][0]
+        d["roe"] = fy["ni"][0] / e0 * 100 if (e0 and e0 > 0 and fy["ni"][0] is not None) else None
         d["op_fy"] = fy["op"][0]
         d["ni_fy"] = fy["ni"][0]
         fc = fy["fin_cost"][0]
@@ -191,6 +193,8 @@ def score_all(recs, export_map):
     # 1) 파생지표
     for r in recs:
         r["m"] = derive(r)
+        if r.get("roe") is None and r["m"].get("roe") is not None:
+            r["roe"] = round(r["m"]["roe"], 1)
         r["is_financial"] = any(k in (r.get("upjong") or "") for k in config.FINANCIAL_KEYWORDS)
 
     # 2) 업종 상대 PER/PBR 중앙값

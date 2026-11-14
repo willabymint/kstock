@@ -31,7 +31,7 @@ def main():
         uni = uni[: int(os.getenv("MAX_STOCKS"))]
     print(f"   {len(uni)}종목")
     if not uni:
-        sys.exit("유니버스 수집 실패 (네이버 금융 접근 확인)")
+        sys.exit("유니버스 수집 실패 (네이버 증권 접근 확인)")
 
     print("2) 코드 매핑 / 수출 / 연기금 / 수동 리스트…")
     dart = Dart(dart_key, http)
@@ -41,24 +41,30 @@ def main():
     if pmsg != "ok":
         warnings.append(f"연기금 수급: {pmsg} (스코어에서 제외됨)")
     manual = reports.manual_lists()
+    ind_names = reports.industry_names(http)
+    if not ind_names:
+        warnings.append("네이버 업종명을 가져오지 못해 표준산업분류(KSIC) 기준 업종을 사용합니다.")
 
     print("3) 종목별 수집(DART·수급·리포트)…")
 
     def work(r):
         code = r["code"]
         try:
-            mi = reports.main_info(http, code)
-            r["upjong"] = mi["upjong"]
-            for k in ("per", "pbr"):          # 시가총액 표에 값이 없으면 종목 페이지 값으로 보충
-                if r.get(k) is None and mi.get(k) is not None:
+            mi = reports.integration(http, code)
+            for k in ("per", "pbr", "frgn_rate"):
+                if mi.get(k) is not None:
                     r[k] = mi[k]
             r["dvr"] = mi.get("dvr")
-            r["export_sector"] = exports.map_sector(r["upjong"])
+            cc = corp.get(code)
+            ksic = dart.ksic(cc) if cc else None
+            r["ksic"] = ksic
+            nv = ind_names.get(mi.get("industry_code") or "")
+            r["upjong"] = nv or exports.ksic_label(ksic) or (f"KSIC {ksic}" if ksic else None)
+            r["export_sector"] = config.SECTOR_OVERRIDE.get(code) or exports.map_sector(nv) or exports.map_ksic(ksic)
             r["flow"] = flows.stock_flow(http, code, r["mcap_eok"])
             if r["flow"]:
                 r["avg_value_eok"] = r["flow"]["avg_value_eok"]
-            r["research"] = reports.research(http, code)
-            cc = corp.get(code)
+            r["research"] = mi["research"]
             r["corp_code"] = cc
             r["dart"] = {}
             if cc:
@@ -96,7 +102,7 @@ def main():
         r["score"] = round(r["score"], 1)
         r["coverage"] = round(r["coverage"], 2)
         r["dart_url"] = "https://dart.fss.or.kr/dsab001/main.do?autoSearch=true&textCrpNm=" + quote(r["name"])
-        r["naver_url"] = f"https://finance.naver.com/item/main.naver?code={r['code']}"
+        r["naver_url"] = f"https://stock.naver.com/domestic/stock/{r['code']}/price"
         r.pop("fin", None)  # 원자료는 용량 때문에 제외(핵심 파생지표 m 만 유지)
 
     # 데이터 품질 요약: 어떤 항목이 얼마나 비었는지 화면 상단에 표시
@@ -114,7 +120,7 @@ def main():
     out = dict(
         meta=dict(generated_at=datetime.now(kst).isoformat(timespec="minutes"), universe=len(recs),
                   weights=config.WEIGHTS, hard=config.HARD, value_watch=config.VALUE_WATCH, warnings=warnings,
-                  export=export_map, sources=["DART OpenAPI", "관세청(data.go.kr)", "네이버 금융", "KRX(pykrx, 선택)"],
+                  export=export_map, sources=["DART OpenAPI", "관세청(data.go.kr)", "네이버 증권", "KRX(pykrx, 선택)"],
                   errors=sum(1 for r in recs if r.get("error")),
                   prev_date=hist.get("prev_date"), runs=hist.get("runs")),
         stocks=recs,

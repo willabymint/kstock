@@ -1,76 +1,68 @@
-"""네이버 금융 시가총액 페이지에서 KOSPI/KOSDAQ 상위 종목 + PER/PBR/ROE 수집.
-
-네이버 시가총액 표는 기본 항목에 PBR이 없어서 '항목 선택(field_submit)' 주소로 요청합니다.
-그래도 PBR/PER 이 비면 run.py 가 종목 메인 페이지 값으로 보충합니다.
-"""
+"""네이버 증권(모바일 데이터 주소)에서 KOSPI/KOSDAQ 시가총액 상위 종목 수집.
+※ 2026년 finance.naver.com 이 stock.naver.com 으로 이전되어 m.stock.naver.com/api 를 사용합니다."""
+import json
 import re
-
-from bs4 import BeautifulSoup
 
 from . import config
 
-URL = "https://finance.naver.com/sise/sise_market_sum.naver"
-SUBMIT = "https://finance.naver.com/sise/field_submit.naver"
-FIELD_IDS = ["market_sum", "frgn_rate", "per", "roe", "pbr", "listed_stock_cnt"]  # 최대 6개
+API = "https://m.stock.naver.com/api/stocks/marketValue/{m}"
 
 
 def num(s):
+    """'+8,216' '46.07%' '15.20배' '3,000원' → 숫자. 없으면 None"""
     if s is None:
         return None
-    s = str(s).replace(",", "").replace("%", "").replace("+", "").strip()
-    if s in ("", "-", "N/A"):
-        return None
-    try:
+    if isinstance(s, (int, float)):
         return float(s)
-    except ValueError:
+    m = re.search(r"-?\d+(?:\.\d+)?", str(s).replace(",", ""))
+    return float(m.group()) if m else None
+
+
+def hangeul_eok(s):
+    """'1,273조 4,567억원' → 억원 단위 숫자"""
+    if not s:
         return None
+    s = str(s).replace(",", "")
+    jo = re.search(r"(\d+(?:\.\d+)?)\s*조", s)
+    eok = re.search(r"(\d+(?:\.\d+)?)\s*억", s)
+    if not jo and not eok:
+        return None
+    return (float(jo.group(1)) * 10000 if jo else 0) + (float(eok.group(1)) if eok else 0)
 
 
-def _parse(html, market):
-    soup = BeautifulSoup(html, "lxml")
-    table = soup.select_one("table.type_2")
-    if table is None:
-        return [], []
-    heads = [th.get_text(strip=True) for th in table.select("thead th")]
-    out = []
-    for tr in table.select("tbody tr"):
-        tds = tr.find_all("td")
-        a = tr.select_one("a.tltle")
-        if a is None or len(tds) < 6:
-            continue
-        code = re.search(r"code=(\d{6})", a.get("href", ""))
-        if not code:
-            continue
-        cells = {h: td.get_text(strip=True) for h, td in zip(heads, tds)}
-        out.append(dict(
-            code=code.group(1), name=a.get_text(strip=True), market=market,
-            mcap_eok=num(cells.get("시가총액")), frgn_rate=num(cells.get("외국인비율")),
-            per=num(cells.get("PER")), roe=num(cells.get("ROE")), pbr=num(cells.get("PBR")),
-            shares_k=num(cells.get("상장주식수")), avg_value_eok=None,
-        ))
-    return out, heads
-
-
-def _get_page(http, sosok, page):
-    ret = f"http://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
-    try:
-        html = http.get(SUBMIT, params={"menu": "market_sum", "returnUrl": ret, "fieldIds": FIELD_IDS},
-                        ttl_h=6, encoding="auto")
-        if "type_2" in html:
-            return html
-    except Exception:  # noqa: BLE001
-        pass
-    return http.get(URL, params={"sosok": sosok, "page": page}, ttl_h=6, encoding="auto")
+def _page(http, market, page, size):
+    js = json.loads(http.get(API.format(m=market), params={"page": page, "pageSize": size}, ttl_h=6))
+    return js.get("stocks") or []
 
 
 def fetch_market(http, market: str, top_n: int):
-    sosok = 0 if market == "KOSPI" else 1
-    out, page = [], 1
-    while len(out) < top_n and page <= 15:
-        rows, _ = _parse(_get_page(http, sosok, page), market)
+    size = None
+    for s in (100, 60, 50, 20):          # 허용되는 페이지 크기를 찾음
+        try:
+            if _page(http, market, 1, s):
+                size = s
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if not size:
+        return []
+    out, seen, page = [], set(), 1
+    while len(out) < top_n and page <= 60:
+        rows = _page(http, market, page, size)
         if not rows:
             break
-        out += [r for r in rows if r["mcap_eok"] and not re.search(config.EXCLUDE_NAME_REGEX, r["name"])]
+        for it in rows:
+            code, name = str(it.get("itemCode") or ""), (it.get("stockName") or "").strip()
+            if not re.fullmatch(r"\d{6}", code) or code in seen:
+                continue
+            if (it.get("stockEndType") or "stock") != "stock" or re.search(config.EXCLUDE_NAME_REGEX, name):
+                continue
+            mcap = hangeul_eok(it.get("marketValueHangeul")) or num(it.get("marketValue"))
+            if not mcap:
+                continue
+            seen.add(code)
+            out.append(dict(code=code, name=name, market=market, mcap_eok=mcap, frgn_rate=None,
+                            per=None, roe=None, pbr=None, avg_value_eok=None))
         page += 1
     return out[:top_n]
 

@@ -1,66 +1,95 @@
-"""증권사 리포트 관심도(네이버 리서치) + 종목 메인 정보(업종/PER/PBR) + 사용자 수동 CSV.
+"""네이버 증권 종목 통합 정보(PER/PBR/업종코드/최근 리포트) + 사용자 수동 CSV.
 
 무료 공개 소스에는 '외국인 대상 영문 리포트/NDR 대상 종목' 목록이 없어서
-(1) 기업 IR 공시 원문의 해외 키워드(dart.overseas_ir), (2) 국내 리포트 커버리지 증가,
+(1) 기업 IR 공시 원문의 해외 키워드(dart.overseas_ir), (2) 국내 리포트 건수,
 (3) 직접 기록하는 data/foreign_coverage.csv 를 합쳐 '관심 신호'로 사용합니다.
 """
 import csv
+import json
 import re
 from datetime import date
 from pathlib import Path
 
-from bs4 import BeautifulSoup
-
 from .universe import num
 
-LIST = "https://finance.naver.com/research/company_list.naver"
-MAIN = "https://finance.naver.com/item/main.naver"
-DATE_RE = re.compile(r"^(\d{2})\.(\d{2})\.(\d{2})$")
+INTEG = "https://m.stock.naver.com/api/stock/{code}/integration"
+INDUSTRY = "https://m.stock.naver.com/api/stocks/industry"
+DATE_RE = re.compile(r"(20\d{2})[-./]?(\d{2})[-./]?(\d{2})")
 
 
-def research(http, code):
-    """최근 30/90일 리포트 건수와 증권사. 표 열: 종목명 | 제목 | 증권사 | 첨부 | 작성일 | 조회수"""
-    try:
-        html = http.get(LIST, params={"searchType": "itemCode", "itemCode": code}, ttl_h=12, encoding="auto")
-    except Exception:  # noqa: BLE001
+def _research(js, today):
+    lst = next((v for k, v in js.items() if "research" in k.lower() and isinstance(v, list)), None)
+    if lst is None:
         return dict(n30=None, n90=None, brokers=[])
-    soup = BeautifulSoup(html, "lxml")
-    today = date.today()
     n30 = n90 = 0
     brokers = set()
-    for tr in soup.select("table.type_1 tr"):
-        tds = [td.get_text(strip=True) for td in tr.find_all("td")]
-        di = next((i for i, t in enumerate(tds) if DATE_RE.match(t)), None)  # 날짜 열 위치를 직접 찾음
-        if di is None or di < 2:
+    for it in lst:
+        if not isinstance(it, dict):
             continue
-        m = DATE_RE.match(tds[di])
-        try:
-            d = date(2000 + int(m.group(1)), int(m.group(2)), int(m.group(3)))
-        except ValueError:
+        d = None
+        for k, v in it.items():
+            m = DATE_RE.search(str(v)) if any(t in k.lower() for t in ("dt", "date", "time")) else None
+            if m:
+                try:
+                    d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                    break
+                except ValueError:
+                    pass
+        if d is None:
             continue
         age = (today - d).days
         if age <= 90:
             n90 += 1
-            brokers.add(tds[di - 2])  # 작성일 두 칸 앞이 증권사
+            b = it.get("bnm") or it.get("brokerName") or it.get("officeName") or it.get("broker")
+            if b:
+                brokers.add(str(b))
         if age <= 30:
             n30 += 1
-    return dict(n30=n30, n90=n90, brokers=sorted(b for b in brokers if b))
+    return dict(n30=n30, n90=n90, brokers=sorted(brokers))
 
 
-def main_info(http, code):
-    """종목 메인 페이지: 업종명 + PER/PBR/배당수익률(시가총액 표에 없을 때 보충용)."""
-    out = dict(upjong=None, per=None, pbr=None, dvr=None)
+def integration(http, code):
+    """PER/PBR/배당수익률/외국인비율/업종코드/최근 리포트."""
+    out = dict(per=None, pbr=None, dvr=None, frgn_rate=None, industry_code=None,
+               research=dict(n30=None, n90=None, brokers=[]), keys=[])
     try:
-        html = http.get(MAIN, params={"code": code}, ttl_h=24, encoding="auto")
-        soup = BeautifulSoup(html, "lxml")
-        a = soup.select_one("div.section.trade_compare h4 em a")
-        out["upjong"] = a.get_text(strip=True) if a else None
-        for k, sel in (("per", "em#_per"), ("pbr", "em#_pbr"), ("dvr", "em#_dvr")):
-            e = soup.select_one(sel)
-            out[k] = num(e.get_text(strip=True)) if e else None
+        js = json.loads(http.get(INTEG.format(code=code), ttl_h=12))
+    except Exception:  # noqa: BLE001
+        return out
+    out["keys"] = sorted(js.keys())
+    for it in js.get("totalInfos") or []:
+        c, k, v = str(it.get("code") or "").lower(), str(it.get("key") or ""), it.get("value")
+        if c == "per" or k.upper() == "PER":
+            out["per"] = num(v)
+        elif c == "pbr" or k.upper() == "PBR":
+            out["pbr"] = num(v)
+        elif c == "dividendyieldratio" or "배당수익률" in k:
+            out["dvr"] = num(v)
+        elif c == "foreignrate" or "외인소진율" in k or "외국인" in k:
+            out["frgn_rate"] = num(v)
+    ic = js.get("industryCode")
+    out["industry_code"] = str(ic) if ic not in (None, "") else None
+    out["research"] = _research(js, date.today())
+    return out
+
+
+def industry_names(http):
+    """네이버 업종코드 → 업종명. 형식이 달라 실패하면 빈 dict (KSIC 분류로 대체됨)."""
+    res = {}
+    try:
+        for page in (1, 2):
+            js = json.loads(http.get(INDUSTRY, params={"page": page, "pageSize": 100}, ttl_h=24 * 7))
+            lst = js if isinstance(js, list) else next((v for v in js.values() if isinstance(v, list) and v and isinstance(v[0], dict)), [])
+            for it in lst:
+                code = next((it[k] for k in ("industryCode", "groupCode", "no", "code") if it.get(k) not in (None, "")), None)
+                name = next((it[k] for k in ("industryName", "groupName", "name") if it.get(k)), None)
+                if code is not None and name:
+                    res[str(code)] = str(name)
+            if len(lst) < 100:
+                break
     except Exception:  # noqa: BLE001
         pass
-    return out
+    return res
 
 
 def manual_lists():

@@ -47,6 +47,7 @@ dialog::backdrop{background:#0008}dialog h2{margin:0 0 4px;font-size:17px}dialog
     <label><input type="checkbox" id="onlyPass" checked> 통과 종목만</label>
     <label><input type="checkbox" id="noFlag"> 경고 플래그 있는 종목 제외</label>
     <label><input type="checkbox" id="onlyNew"> 신규 통과만</label>
+    <label><input type="checkbox" id="onlyExp"> 수출 업종만 보기</label>
     <button id="csv">CSV 저장</button>
     <button id="reset">가중치 초기화</button>
     </span><span class="mut" id="cnt"></span>
@@ -87,9 +88,9 @@ function setView(v){view=v;$("#tabMain").classList.toggle("on",v==="main");$("#t
   if(v==="main")$("#mainCtl").style.display="contents";render()}
 function render(){
   if(view==="vw")return renderVW();
-  const q=$("#q").value.trim().toLowerCase(),mk=$("#mk").value,minS=+$("#minS").value||0,onlyPass=$("#onlyPass").checked,noFlag=$("#noFlag").checked,onlyNew=$("#onlyNew").checked;
+  const q=$("#q").value.trim().toLowerCase(),mk=$("#mk").value,minS=+$("#minS").value||0,onlyPass=$("#onlyPass").checked,noFlag=$("#noFlag").checked,onlyNew=$("#onlyNew").checked,onlyExp=$("#onlyExp").checked;
   let rows=D.stocks.map(s=>{[s.score,s.coverage]=total(s);return s}).filter(s=>
-    (!mk||s.market===mk)&&(!q||(s.name+s.code+(s.upjong||"")).toLowerCase().includes(q))&&s.score>=minS&&(!onlyPass||!s.excluded.length)&&(!noFlag||!s.flags.length)&&(!onlyNew||s.new_pass));
+    (!mk||s.market===mk)&&(!q||(s.name+s.code+(s.upjong||"")).toLowerCase().includes(q))&&s.score>=minS&&(!onlyPass||!s.excluded.length)&&(!noFlag||!s.flags.length)&&(!onlyNew||s.new_pass)&&(!onlyExp||s.factors.export!=null));
   LAST=rows;
   rows.sort((a,b)=>{const x=val(a,sortK),y=val(b,sortK);return (typeof x==="string"?x.localeCompare(y):((x??-1e18)-(y??-1e18)))*sortD});
   $("#cnt").textContent=`${rows.length}종목 표시 / 전체 ${D.stocks.length} (통과 ${D.stocks.filter(s=>!s.excluded.length).length})`;

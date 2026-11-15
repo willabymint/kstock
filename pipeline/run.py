@@ -60,7 +60,9 @@ def main():
             r["ksic"] = ksic
             nv = ind_names.get(mi.get("industry_code") or "")
             r["upjong"] = nv or exports.ksic_label(ksic) or (f"KSIC {ksic}" if ksic else None)
-            r["export_sector"] = config.SECTOR_OVERRIDE.get(code) or exports.map_sector(nv) or exports.map_ksic(ksic)
+            holding = str(ksic or "").startswith("6499") or r["name"].endswith(("홀딩스", "지주"))
+            r["is_holding"] = holding   # 지주회사는 자회사 업종의 수출 통계를 그대로 적용하지 않음
+            r["export_sector"] = config.SECTOR_OVERRIDE.get(code) or (None if holding else (exports.map_sector(nv) or exports.map_ksic(ksic)))
             r["flow"] = flows.stock_flow(http, code, r["mcap_eok"])
             if r["flow"]:
                 r["avg_value_eok"] = r["flow"]["avg_value_eok"]

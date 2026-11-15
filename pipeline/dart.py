@@ -121,7 +121,7 @@ class Dart:
 
     # ---- 5% 대량보유: 국민연금/해외 장기투자자/경영권 -------------------
     def major_holders(self, corp, today=None):
-        """보고자별 '가장 최근' 5% 보고만 사용. 국민연금 3년, 증감 1년, 경영권 2년, 상속 3년 이내만 인정."""
+        """보고자별 '가장 최근' 5% 보고만 사용. 국민연금 5년, 증감 1년, 경영권 2년, 상속 3년 이내만 인정."""
         today = today or date.today()
         d = self._json("majorstock.json", corp_code=corp, ttl_h=24)
         rows = d.get("list") or []
@@ -149,7 +149,7 @@ class Dart:
             if who in seen:
                 continue
             seen.add(who)  # 이 보고자의 최신 보고
-            if "국민연금" in who and a <= 1095 and rate is not None:
+            if "국민연금" in who and a <= 1825 and rate is not None:
                 res["nps_rate"], res["nps_date"] = rate, r.get("rcept_dt")
                 res["nps_chg"] = _amt(r.get("stkrt_irds")) if a <= 365 else None
             if a <= 1095 and (rate or 0) >= 5 and any(k.lower() in who.lower() for k in config.FOREIGN_LONGONLY):

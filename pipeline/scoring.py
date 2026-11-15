@@ -338,8 +338,8 @@ def score_all(recs, export_map):
             hi.append("기업 IR 공시에 해외/외국인 대상 일정 포함")
         if r.get("foreign_note"):
             hi.append(f"외국인 대상 영업(수동기록): {r['foreign_note']}")
-        if (rs.get("n30") or 0) >= 4:
-            hi.append(f"최근 30일 국내 리포트 {rs['n30']}건({len(rs.get('brokers', []))}개 증권사/90일)")
+        if (rs.get("n30") or 0) >= 5:
+            hi.append(f"최근 30일 국내 리포트 5건 이상({', '.join(rs.get('brokers', [])[:3])} 등)")
 
         # governance ------------------------------------------------------------
         g = 50.0
